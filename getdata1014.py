@@ -1,84 +1,133 @@
 # encoding:utf-8
+'''
+bak_foot_his:
+https://caipiao.eastmoney.com/Result/History/sfc?page=1
+https://www.lottery.gov.cn/kj/kjlb.html?sfc
+
+bak_foot_train / bak_foot_new:
+(https://cp.zgzcw.com/lottery/getissue.action?lotteryId=300&issueLen=20
+https://cp.zgzcw.com/lottery/zcplayvs.action?lotteryId=13&issue=
+https://fenxi.zgzcw.com/?playid?/bjop)
+
+(https://webapi.sporttery.cn/gateway/lottery/getFootBallMatchV1.qry?param=90,0&sellStatus=0&termLimits=10
+https://www.sporttery.cn/jc/zqdz/index.html?showType=2&mid=1027293)
+
+foot_train / foot_new:
+https://live.500star.com/zucai.php?e=24168
+'''
 import os
+import re
 import time
 import chardet
 import logging
 import requests
 import pandas as pd
 from lxml import etree
+from datetime import datetime
 from urllib.parse import urlparse
 from collections import deque,defaultdict
-from typing import List,Dict,Any,Optional
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def flatten_dict(multi_li,columns,rows):
+    return {f"{col},{row}": multi_li[row_idx][col_idx]
+                for row_idx,row in enumerate(rows)
+                for col_idx,col in enumerate(columns)}
+
+def ftext(element):
+    try:
+        return ''.join(element.itertext()).strip() \
+        if element is not None else ''
+    except Exception as e:
+        return ''
+
+def get_local_df(path):
+    if path and os.path.isfile(path):
+        return pd.read_csv(path)
+
+def save_data(in_data,path='',colname=[]):
+    if isinstance(in_data,list) and colname and path:
+        df = pd.DataFrame(in_data,columns=colname)
+        df.to_csv(path,index=False)
+    elif isinstance(in_data,pd.DataFrame):
+        in_data.to_csv(path,index=False)
+
 pipeline = {
     'dlt':{
         'nodes':[
-            {'id':'dlt','url':'https://data.17500.cn/dlt_asc.txt',
-             'func':'fetch_parse_a','output_val':[],
-             'save_conf':{'path':'dlt_data.csv','colname':['index','time','r1','r2','r3','r4','r5','b1','b2']}}
+            {'id':'dlt','func':'fetch_parse_a',
+             'url':'https://data.17500.cn/dlt_asc.txt',
+             'output':[],
+             'save':{'path':'dlt_data.csv','colname':['index','time','r1','r2','r3','r4','r5','b1','b2']}}
         ],
         'links':[]
     },
     'ssq':{
         'nodes':[
-            {'id':'ssq','url':'https://data.17500.cn/ssq_asc.txt',
-             'func':'fetch_parse_a','output_val':[],
-             'save_conf':{'path':'ssq_data.csv','colname':['index','time','r1','r2','r3','r4','r5','r6','b1']}}
+            {'id':'ssq','func':'fetch_parse_a',
+             'url':'https://data.17500.cn/ssq_asc.txt',
+             'output':[],
+             'save':{'path':'ssq_data.csv','colname':['index','time','r1','r2','r3','r4','r5','r6','b1']}}
         ],
-        'links':[]        
+        'links':[]     
     },
     'kl8':{
         'nodes':[
-            {'id':'kl8','url':'https://data.17500.cn/kl8_asc.txt',
-             'func':'fetch_parse_a','output_val':[],
-             'save_conf':{'path':'kl8_data.csv','colname':['index','time','r1','r2','r3','r4','r5','r6','r7',
-            'r8','r9','r10','r11','r12','r13','r14','r15','r16','r17','r18','r19','r20']}}
+            {'id':'kl8','func':'fetch_parse_a',
+             'url':'https://data.17500.cn/kl8_asc.txt',
+             'output':[],
+             'save':{'path':'kl8_data.csv','colname':['index','time','r1','r2','r3','r4','r5','r6','r7',
+             'r8','r9','r10','r11','r12','r13','r14','r15','r16','r17','r18','r19','r20']}}
         ],
-        'links':[]        
+        'links':[]     
     },
     'pl3':{
         'nodes':[
-            {'id':'pl3','url':'https://data.17500.cn/pl3_asc.txt',
-             'func':'fetch_parse_a','output_val':[],
-             'save_conf':{'path':'pl3_data.csv','colname':['index','time','r1','r2','r3']}}
+            {'id':'pl3','func':'fetch_parse_a',
+             'url':'https://data.17500.cn/pl3_asc.txt',
+             'output':[],
+             'save':{'path':'pl3_data.csv','colname':['index','time','r1','r2','r3']}}
         ],
-        'links':[]        
+        'links':[]    
     },
     'pl5':{
         'nodes':[
-            {'id':'pl5','url':'https://data.17500.cn/pl5_asc.txt',
-             'func':'fetch_parse_a','output_val':[],
-             'save_conf':{'path':'pl5_data.csv','colname':['index','time','r1','r2','r3','r4','r5']}}
-        ],
-        'links':[]
-    },
-    'foot_his':{
-        'nodes':[
-            {'id':'foot_his','url':'https://webapi.sporttery.cn/gateway/lottery/getHistoryPageListV1.qry?gameNo=90&provinceId=0&&isVerify=1&pageSize=30&pageNo=',
-             'func':'fetch_parse_b','output_val':[],
-             'save_conf':{'path':'foot_his_data.csv','colname':['index','time','r1','r2','r3','r4','r5','r6','r7',
-            'r8','r9','r10','r11','r12','r13','r14']}}
+            {'id':'pl5','func':'fetch_parse_a',
+             'url':'https://data.17500.cn/pl5_asc.txt',
+             'output':[],
+             'save':{'path':'pl5_data.csv','colname':['index','time','r1','r2','r3','r4','r5']}}
         ],
         'links':[]
     },
     'foot_new':{
         'nodes':[
-            {'id':'issueid','url':'https://cp.zgzcw.com/lottery/getissue.action?lotteryId=300&issueLen=20',
-             'func':'fetch_parse_c','output_val':[]},
-            {'id':'matchlist','url':'https://cp.zgzcw.com/lottery/zcplayvs.action?lotteryId=13&issue=',
-             'func':'fetch_parse_d','output_val':[]},
-            {'id':'bjop','url':'https://fenxi.zgzcw.com/?playid?/bjop',
-             'func':'fetch_parse_e','output_val':[]},
-            {'id':'sink','url':'','func':'fetch_parse_f','output_val':[],
-             'save_conf':{'path':'footnewinfo_data.csv','colname':[]}},
+            {'id':'match_li','func':'fetch_parse_c',
+             'url':'https://live.500star.com/zucai.php/',
+             'output':[],
+             'save':{'path':'next_match.csv','colname':[]}},
+            {'id':'odds_li','func':'fetch_parse_d',
+             'output':[],
+             'save':{'path':'next_match_odds.csv','colname':[]}},
+            {'id':'sj_li','func':'fetch_parse_e',
+             'output':[],
+             'save':{'path':'next_match_sj.csv','colname':
+              ['playid','team','host','m0_cnt','w0','d0','l0','m0_hit','m0_mis',
+               'm1_cnt','w1','d1','l1','m1_hit','m1_mis','m_dval','m_num','m_r','m_p']}}
         ],
-        'links':[{'from':'issueid','to':'matchlist'},
-                 {'from':'matchlist','to':'bjop'},
-                 {'from':'bjop','to':'sink'}]
+        'links':[{'from':'match_li','to':'odds_li'},
+                 {'from':'match_li','to':'sj_li'}]
     },
+    'foot_his':{
+        'nodes':[
+            {'id':'foot_his','func':'fetch_parse_b',
+             'url':'https://webapi.sporttery.cn/gateway/lottery/getHistoryPageListV1.qry?gameNo=90&provinceId=0&&isVerify=1&pageSize=30&pageNo=',
+             'output':[],
+             'save':{'path':'foot_his_result.csv','colname':['index','time','r1','r2','r3','r4','r5','r6','r7',
+             'r8','r9','r10','r11','r12','r13','r14']}}
+        ],
+        'links':[]
+    }
 }
 
 class Fetcher:
@@ -91,180 +140,192 @@ class Fetcher:
             'Connection': 'keep-alive'
         })
 
-    def fetch_url(self,url:str,response_type:str,timeout:int=10)->Any:
+    def fetch_url(self,url,rep_t,sleeptime:int=4,timeout:int=10,retry:int=2):
         parsed_url = urlparse(url)
         self.session.headers.update({'Referer':f"{parsed_url.scheme}://{parsed_url.netloc}"})
-        try:
-            logger.info(f"Fetching URL:{url}")
-            response = self.session.get(url,timeout=timeout)
-            time.sleep(6)
-            response.encoding = chardet.detect(response.content)['encoding']
-            response.raise_for_status()
-            return response.json() if response_type =='json' else response.text
-        except requests.Timeout:
-            logger.error(f"请求超时：{url}")
-        except requests.RequestException as e:
-            logger.error(f"请求发生错误:{e}")
-        return None
+        for attempt in range(retry):
+            try:
+                logger.info(f"Fetching URL:{url}")
+                response = self.session.get(url,timeout=timeout)
+                time.sleep(sleeptime)
+                response.encoding = chardet.detect(response.content)['encoding']
+                response.raise_for_status()
+                if rep_t =='json':
+                    return response.json()
+                elif rep_t =='text':
+                    return response.text if response.text else None
+                elif rep_t =='html':
+                    return etree.HTML(response.text) if response.text else None
+            except Exception as e:
+                logger.error(f"{e}：{url}")
+                if attempt < retry-1:
+                    logger.info("Retrying...")
+                else:
+                    return None
 
-class Parser:
-    def __init__(self) -> None:
-        pass
-    def get_siblings_content(self,td_element):
-        return [''.join(sibling.itertext()).strip() for sibling in td_element.itersiblings()]
-    def find_td_content(self,tree,text):
-        td_element = tree.xpath(f'//td[@class="border-r border-l" and text()="{text}"]')
-        if td_element:
-            siblings_content = self.get_siblings_content(td_element[0])
-            return [item for item in siblings_content if item and '-' not in item]
-        else:
-            print(f'未找到元素')
-
-    def find_span_content(self,tree):
-        span_element = tree.xpath(f'//span[@class="otherodds" and contains(text(),"离散度")]')
-        if span_element:
-            parts = span_element[0].text.split('|')
-            # 去除每部分前后的空格，并分割成列表  
-            lsd_values = [round(float(num)/10,2) for num in parts[0].strip().split()[1:]]
-            if '\xa0\xa0' in parts[0]:
-                lsd_values = lsd_values[:1] + [0.00] + lsd_values[1:]
-            fc_values = [round(float(num),2) for num in parts[1].strip().split()[1:]]  
-            if '\xa0\xa0' in parts[1]:
-                fc_values = fc_values[:1] + [0.00] + fc_values[1:]            
-            return {'lsd': lsd_values, 'fc': fc_values}
-        else:
-            print(f'未找到元素')
-
-    def create_multiindex_df(self,data,columns,indexname):
-        df = pd.DataFrame(data,index=indexname,columns=columns)
-        new_columns = pd.MultiIndex.from_product([df.columns,indexname])
-        new_df = pd.DataFrame(columns=new_columns)
-        for idx,index in enumerate(indexname):
-            new_df.loc[0,(slice(None),index)] = df.iloc[idx].values
-        return new_df
-            
 class SNode:
-    def __init__(self,id:str,url:str,func:str,output_val=None,save_conf:Optional[Dict[str,Any]]=None):
+    def __init__(self,id,func,url='',input=[],output=None,save=None):
         self.id = id
         self.url = url
         self.pfunc = func
-        self.input = []
-        self.output = output_val
-        self.path = save_conf.get('path') if save_conf else None
-        self.colname =  save_conf.get('colname') if save_conf else None
+        self.input = input
+        self.output = output
+        self.path = save.get('path') if save else None
+        self.colname =  save.get('colname') if save else None
     
     def execute(self):
         func = getattr(self,self.pfunc)
         func(self.input,self.url)
 
-    def fetch_parse_a(self,input,url:str):
+    def fetch_parse_a(self,input,url):
         '''get input +combine url'''
         data = fetcher.fetch_url(url,'text')
-        len_sp = len(self.colname)
         if data:
             str_li = data.strip().split('\n')
             for str_line in str_li:
-                sp_li = str_line.split()[:len_sp]
+                sp_li = str_line.split()[:len(self.colname)]
                 self.output.append(sp_li)
-            self.save_data(self.output)
+            save_data(self.output,self.path,self.colname)
 
-    def fetch_parse_b(self,input,baseurl:str):
-        local_df = self.get_local_df()
+    def fetch_parse_b(self,input,baseurl):
+        local_df = get_local_df(self.path)
         local_li = local_df.values.tolist() if local_df is not None else []
-        need_update = True
-        numpage = 1
+        localnum = int(local_df.iloc[0,0]) if local_df is not None else 0
+        need_update,numpage = True,1
         while need_update:
-            url = f"{baseurl}{numpage}"
-            data = fetcher.fetch_url(url,'json')
+            data = fetcher.fetch_url(f'{baseurl}{numpage}','json')
             numpage += 1
             if not data or numpage > data['value']['pages']:
-                need_update = False
                 break                  
             for resitem in data['value']['list']:
-                data_string = [resitem['lotteryDrawNum'],resitem['lotteryDrawTime']] + \
-                                resitem['lotteryDrawResult'].split()
-                if local_df is None or int(data_string[0]) > int(local_df.iloc[0,0]):
+                result_tup = tuple(int(float(num)) if num != '*' else num \
+                            for num in resitem['lotteryDrawResult'].split())  
+                data_string = (resitem['lotteryDrawNum'],resitem['lotteryDrawTime']) \
+                              + result_tup
+                if int(data_string[0]) > localnum:
                     self.output.append(data_string)
                 else:
                     need_update =False
                     break
-        self.output += local_li
-        self.save_data(self.output)        
+        self.output.extend(local_li)
+        save_data(self.output,self.path,self.colname)
 
-    def fetch_parse_c(self,input,url:str):
-        '''get input +combine url / parse data + output'''
-        data = fetcher.fetch_url(url,'json')
-        if data:
-            for index, item in enumerate(data):
-                #最多取在售前3期
-                if index < 3:
-                    match_dict = {'issueid':item['issue'],'startTime':item['startTime'],
-                             'endTime':item['endTime'],'leftTime':item['leftTime']}
-                    self.output.append(match_dict)
+    def fetch_parse_c(self,input,url):
+        dtree = fetcher.fetch_url(url,'html')
+        if dtree is not None:
+            playid = dtree.xpath('//select[@id="sel_expect"]/option/@value')[0]
+            row_status = dtree.xpath('//tr[@status="0"]')
+            for row in row_status:
+                td_elements = row.xpath('td[6]|td[8]|td[10]|td[11]')
 
-    def fetch_parse_d(self,input,baseurl:str):
-        '''get input +combine url / parse data + output'''
-        next_match_li = input
-        for match_id in next_match_li:
-            url = f"{baseurl}{match_id['issueid']}"
-            data = fetcher.fetch_url(url,'json')
-            if data:
-                for item in data['matchInfo']:
-                    self.output.append({'issueid':match_id['issueid'],'playid':item['playId'],'leage':item['leageName'],
-                             'host':item['hostNameFull'],'guest':item['guestNameFull']})
+                host = re.sub(r'\[\d+\](\d+)?','',ftext(td_elements[0]))
+                guest = re.sub(r'\d*\[\d+\]','',ftext(td_elements[1]))
+                links = td_elements[2].xpath('.//a[contains(text(),"析") or contains(text(),"欧")]') \
+                        if len(td_elements) > 2 else []
+                link1,link2 = (f'https:{link.get("href")}' for link in links[:2]) \
+                              if len(links)>1 else ('','')
 
-    def fetch_parse_e(self,input,baseurl:str):
-        '''get input +combine url / parse data + output'''
-        next_info_dict_li = input
-        next_info_df = pd.DataFrame()
-        for dict_item in next_info_dict_li:
-            if dict_item['playid'] == '0':
-                logger.warning(f"odds info is None Skip!!!")
-                continue
-            url = baseurl.replace('?playid?',dict_item['playid'])
-            data = fetcher.fetch_url(url,'text')
-            if data:
-                index_df0 = pd.DataFrame([dict_item])
+                result = ftext(td_elements[3]).split(' ')[0]
+                self.output.append({'playid':playid,'host':host,'guest':guest,\
+                                    'result':result,'sj':link1,'odds':link2})
+        output_df = pd.DataFrame(self.output)
+        save_data(output_df,self.path)
+        del output_df
 
-                tree = etree.HTML(data)
-                meanli = parser.find_td_content(tree,'平均值')
-                maxli = parser.find_td_content(tree,'最大值')
-                minli = parser.find_td_content(tree,'最小值')
-                columns = ['old_ods_w','old_ods_d','old_ods_d','new_ods_w','new_ods_d','new_ods_l',
-                'w_p','d_p','l_p','kl_w','kl_d','kl_l','ex_r']
-                indexname = ['min','mean','max']
-                multi_df1 = parser.create_multiindex_df([minli,meanli,maxli],columns,indexname)
+    def fetch_parse_cc(self,input,baseurl):
+        new_hisdf = get_local_df(input[0])
+        local_playinfo = get_local_df(self.path)
+        local_playid = int(local_playinfo['playid'][0]) \
+                    if local_playinfo is not None else 0
+        new_hisdf['time'] = pd.to_datetime(new_hisdf['time'])
+        one_year_ago = datetime(datetime.now().year - 1, 1, 1)
 
-                res_dict = parser.find_span_content(tree)
-                columns = ['lsd','fc']
-                indexname = ['klw','kld','kll']                    
-                multi_df2 = parser.create_multiindex_df(res_dict,columns,indexname)
-                
-                multi_df = pd.concat([index_df0,multi_df1,multi_df2],axis=1)
+        update_playid = new_hisdf[(new_hisdf['index']>local_playid) &
+                                  (new_hisdf['time'] >= one_year_ago)]['index'].tolist()
+        for playid in update_playid:
+            dtree = fetcher.fetch_url(f'{baseurl}{playid}','html')
+            if dtree is not None:
+                row_status = dtree.xpath('//tr[@status="4"]')
+                for row in row_status:
+                    td_elements = row.xpath('td[6]|td[8]|td[10]|td[11]')
 
-                next_info_df = pd.concat([next_info_df,multi_df],axis=0)
-        self.output = [next_info_df]
-                
-    def fetch_parse_f(self,input,baseurl:str):
-        next_info_df = input[0]
-        self.save_data(next_info_df)
+                    host = re.sub(r'\[\d+\](\d+)?','',ftext(td_elements[0]))
+                    guest = re.sub(r'\d*\[\d+\]','',ftext(td_elements[1]))
+                    links = td_elements[2].xpath('.//a[contains(text(),"析") or contains(text(),"欧")]') \
+                            if len(td_elements) > 2 else []
+                    link1,link2 = (f'https:{link.get("href")}' for link in links[:2]) \
+                                if len(links)>1 else ('','')
+                    result = ftext(td_elements[3])
+                    self.output.append({'playid':playid,'host':host,'guest':guest,\
+                                        'result':result,'sj':link1,'odds':link2})
+        output_df = pd.DataFrame(self.output)
+        local_playinfo = pd.concat([output_df,local_playinfo],ignore_index=True)
+        save_data(local_playinfo,self.path)
+        del output_df,local_playinfo
 
-    def get_local_df(self):
-        if self.path and os.path.isfile(self.path):
-            return pd.read_csv(self.path)
-    
-    def save_data(self,in_data):
-        if isinstance(in_data,list):
-            if self.colname and self.path:
-                df = pd.DataFrame(in_data,columns=self.colname)
-                df.to_csv(self.path,index=False)
-        elif isinstance(in_data,pd.DataFrame):
-            in_data.to_csv(self.path,index=False)
+    def fetch_parse_d(self,input,url):
+        columns = ('old_odw','old_odd','old_odl','new_odw','new_odd','new_odl',\
+                   'old_wp','old_dp','old_lp','new_wp','new_dp','new_lp')
+        targets = [('最低值','平均值','最高值'),('min','mean','max')]
+        match_l = input
+        odds_dict_li = []
+        for match in match_l:
+            oddstree = fetcher.fetch_url(match['odds'],'html')
+            if oddstree is not None:
+                results = [[] for _ in range(len(targets[0]))]
+                for i,target in enumerate(targets[0]):
+                    target_td = oddstree.xpath(f"//td[text()='{target}']")
+                    if target_td:
+                        siblings = target_td[0].getnext(),target_td[0].getnext().getnext()
+                        for sibling in siblings:
+                            if sibling is not None:
+                                td_elements = sibling.xpath('.//td')
+                                results[i].extend(ftext(td) for td in td_elements)
+                odds_dict = {}
+                odds_dict.update({'playid':match['playid'],'host':match['host'],
+                                  'guest':match['guest'],'result':match['result']})
+                odds_dict.update(flatten_dict(results,columns,targets[1]))
+                odds_dict_li.append(odds_dict)
+                del results,odds_dict
+        next_odds_df = pd.DataFrame(odds_dict_li)
+        save_data(next_odds_df,self.path)
+        del odds_dict_li,next_odds_df
+
+
+    def fetch_parse_e(self,input,url):
+        match_l = input
+        for match in match_l:
+            sjtree = fetcher.fetch_url(match['sj'],'html')
+            if sjtree is not None:
+                chenji_td = sjtree.xpath('//td[@class="td_one" and text()="总成绩"]/following-sibling::td')
+                chenji_li = [tuple() for _ in range(2)]
+                half_len = len(chenji_td) // 2
+                for idx,td in enumerate(chenji_td):
+                    chenji_li[idx < half_len] +=(ftext(td),)
+
+                zhanj_p = sjtree.xpath('//p[contains(text(),"近10场战绩")]')
+                zhanji_li = []
+                for i in range(min(len(zhanj_p),2)):
+                    search_r = re.search(r'(\w+)近(\d+)场战绩(\d+)胜(\d+)平(\d+)负进(\d+)球失(\d+)球',ftext(zhanj_p[i]))
+                    if search_r:
+                        ishost = 1 if i ==0 else 0
+                        zhanji_li.append((
+                            match['playid'],search_r.group(1),ishost,
+                            int(search_r.group(2)),int(search_r.group(3)),
+                            int(search_r.group(4)),int(search_r.group(5)),
+                            int(search_r.group(6)),int(search_r.group(7)),
+                        ))
+            self.output.extend(zhanji +chenji for zhanji,chenji in zip(zhanji_li,chenji_li))
+        save_data(self.output,self.path,self.colname)
+
+    def fetch_parse_f(self,input,baseurl):
+        pass
 
 class Graph:
-    def __init__(self) -> None:
+    def __init__(self):
         self.graph = defaultdict(list)
         self.indegree = defaultdict(int)
+
     def add_link(self,u:SNode,v:SNode):
         self.graph[u].append(v)
         self.indegree[v] += 1
@@ -284,14 +345,14 @@ class Graph:
                     queue.append(neighbor)
         return result
 
-def init_fetcher_parser():
-    global fetcher,parser
+def init_fetcher():
+    global fetcher
     fetcher = Fetcher()
-    parser = Parser()
 
-def load_graph_from_config(config:Dict[str,Any]):
+def load_graph_from_config(config):
     g = Graph()
-    nodes = {node_config['id']:SNode(**node_config) for node_config in config['nodes']}
+    nodes = {node_config['id']:SNode(**node_config) 
+                for node_config in config['nodes']}
     for node in nodes.values():
         g.indegree[node]
     for link in config['links']:
@@ -299,7 +360,7 @@ def load_graph_from_config(config:Dict[str,Any]):
     return g
 
 if __name__ == "__main__":
-    init_fetcher_parser()
+    init_fetcher()
     for key,value in pipeline.items():
         g = load_graph_from_config(value)
         if len(g.indegree) == 1:
