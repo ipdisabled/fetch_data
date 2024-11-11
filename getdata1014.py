@@ -58,7 +58,6 @@ pipeline = {
         'nodes':[
             {'id':'dlt','func':'fetch_parse_a',
              'url':'https://data.17500.cn/dlt_asc.txt',
-             'output':[],
              'save':{'path':'dlt_data.csv','colname':['index','time','r1','r2','r3','r4','r5','b1','b2']}}
         ],
         'links':[]
@@ -67,7 +66,6 @@ pipeline = {
         'nodes':[
             {'id':'ssq','func':'fetch_parse_a',
              'url':'https://data.17500.cn/ssq_asc.txt',
-             'output':[],
              'save':{'path':'ssq_data.csv','colname':['index','time','r1','r2','r3','r4','r5','r6','b1']}}
         ],
         'links':[]     
@@ -76,7 +74,6 @@ pipeline = {
         'nodes':[
             {'id':'kl8','func':'fetch_parse_a',
              'url':'https://data.17500.cn/kl8_asc.txt',
-             'output':[],
              'save':{'path':'kl8_data.csv','colname':['index','time','r1','r2','r3','r4','r5','r6','r7',
              'r8','r9','r10','r11','r12','r13','r14','r15','r16','r17','r18','r19','r20']}}
         ],
@@ -86,7 +83,6 @@ pipeline = {
         'nodes':[
             {'id':'pl3','func':'fetch_parse_a',
              'url':'https://data.17500.cn/pl3_asc.txt',
-             'output':[],
              'save':{'path':'pl3_data.csv','colname':['index','time','r1','r2','r3']}}
         ],
         'links':[]    
@@ -95,7 +91,6 @@ pipeline = {
         'nodes':[
             {'id':'pl5','func':'fetch_parse_a',
              'url':'https://data.17500.cn/pl5_asc.txt',
-             'output':[],
              'save':{'path':'pl5_data.csv','colname':['index','time','r1','r2','r3','r4','r5']}}
         ],
         'links':[]
@@ -104,13 +99,10 @@ pipeline = {
         'nodes':[
             {'id':'match_li','func':'fetch_parse_c',
              'url':'https://live.500star.com/zucai.php/',
-             'output':[],
-             'save':{'path':'next_match.csv','colname':[]}},
+             'save':{'path':'next_match.csv'}},
             {'id':'odds_li','func':'fetch_parse_d',
-             'output':[],
-             'save':{'path':'next_match_odds.csv','colname':[]}},
+             'save':{'path':'next_match_odds.csv'}},
             {'id':'sj_li','func':'fetch_parse_e',
-             'output':[],
              'save':{'path':'next_match_sj.csv','colname':
               ['playid','team','host','m0_cnt','w0','d0','l0','m0_hit','m0_mis',
                'm1_cnt','w1','d1','l1','m1_hit','m1_mis','m_dval','m_num','m_r','m_p']}}
@@ -121,12 +113,27 @@ pipeline = {
     'foot_his':{
         'nodes':[
             {'id':'foot_his','func':'fetch_parse_b',
-             'url':'https://webapi.sporttery.cn/gateway/lottery/getHistoryPageListV1.qry?gameNo=90&provinceId=0&&isVerify=1&pageSize=30&pageNo=',
-             'output':[],
+             'url':'https://webapi.sporttery.cn/gateway/lottery/getHistoryPageListV1.qry?gameNo=90&provinceId=0&&isVerify=1&pageSize=30&pageNo=',  
              'save':{'path':'foot_his_result.csv','colname':['index','time','r1','r2','r3','r4','r5','r6','r7',
              'r8','r9','r10','r11','r12','r13','r14']}}
         ],
         'links':[]
+    },
+    'foot_train':{
+        'nodes':[
+            {'id':'playinfo_li','func':'fetch_parse_cc',
+             'url':'https://live.500star.com/zucai.php/?e=',
+             'input':['foot_his_result.csv'],
+             'save':{'path':'foot_play_info.csv'}},
+            {'id':'odds_li','func':'fetch_parse_d','extend':1,
+             'save':{'path':'train_match_odds.csv'}},
+            {'id':'sj_li','func':'fetch_parse_e','extend':1,
+             'save':{'path':'train_match_sj.csv','colname':
+              ['playid','team','host','m0_cnt','w0','d0','l0','m0_hit','m0_mis',
+               'm1_cnt','w1','d1','l1','m1_hit','m1_mis','m_dval','m_num','m_r','m_p']}}
+        ],
+        'links':[{'from':'playinfo_li','to':'odds_li'},
+                 {'from':'playinfo_li','to':'sj_li'}]
     }
 }
 
@@ -164,12 +171,13 @@ class Fetcher:
                     return None
 
 class SNode:
-    def __init__(self,id,func,url='',input=[],output=None,save=None):
+    def __init__(self,id,func,url='',extend=0,input=None,output=None,save=None):
         self.id = id
         self.url = url
         self.pfunc = func
-        self.input = input
-        self.output = output
+        self.extend = extend if extend is not None else 0
+        self.input = input if input is not None else []
+        self.output = output if output is not None else []
         self.path = save.get('path') if save else None
         self.colname =  save.get('colname') if save else None
     
@@ -267,9 +275,14 @@ class SNode:
         columns = ('old_odw','old_odd','old_odl','new_odw','new_odd','new_odl',\
                    'old_wp','old_dp','old_lp','new_wp','new_dp','new_lp')
         targets = [('最低值','平均值','最高值'),('min','mean','max')]
-        match_l = input
-        odds_dict_li = []
-        for match in match_l:
+
+        odds_dict_li,local_odds_df = [],None
+        if self.extend == 1:
+            local_odds_df = get_local_df(self.path)
+        max_play_id = local_odds_df.iloc[0]['playid']if local_odds_df is not None else 0
+        update_match_li = [item for item in input if int(item['playid']) > max_play_id]
+
+        for match in update_match_li:
             oddstree = fetcher.fetch_url(match['odds'],'html')
             if oddstree is not None:
                 results = [[] for _ in range(len(targets[0]))]
@@ -287,14 +300,25 @@ class SNode:
                 odds_dict.update(flatten_dict(results,columns,targets[1]))
                 odds_dict_li.append(odds_dict)
                 del results,odds_dict
-        next_odds_df = pd.DataFrame(odds_dict_li)
-        save_data(next_odds_df,self.path)
-        del odds_dict_li,next_odds_df
 
+        next_odds_df = pd.DataFrame(odds_dict_li)
+        if not next_odds_df.empty and local_odds_df is not None :
+            next_odds_df = pd.concat([next_odds_df, local_odds_df], ignore_index=True,copy=False)
+        elif next_odds_df.empty:
+            next_odds_df = local_odds_df
+        save_data(next_odds_df,self.path)
+        del update_match_li,odds_dict_li,next_odds_df,local_odds_df
 
     def fetch_parse_e(self,input,url):
-        match_l = input
-        for match in match_l:
+
+        local_sj_df =None
+        if self.extend != 0:
+            local_sj_df = get_local_df(self.path)
+            #self.output = local_sj_df.values.tolist() if local_sj_df is not None else []
+        max_play_id = local_sj_df.iloc[0]['playid']if local_sj_df is not None else 0
+        update_match_li = [item for item in input if int(item['playid']) > max_play_id]
+
+        for match in update_match_li:
             sjtree = fetcher.fetch_url(match['sj'],'html')
             if sjtree is not None:
                 chenji_td = sjtree.xpath('//td[@class="td_one" and text()="总成绩"]/following-sibling::td')
@@ -316,7 +340,14 @@ class SNode:
                             int(search_r.group(6)),int(search_r.group(7)),
                         ))
             self.output.extend(zhanji +chenji for zhanji,chenji in zip(zhanji_li,chenji_li))
-        save_data(self.output,self.path,self.colname)
+        
+        next_sj_df = pd.DataFrame(self.output,columns=self.colname)
+        if not next_sj_df.empty and local_sj_df is not None :
+            next_sj_df = pd.concat([next_sj_df, local_sj_df], ignore_index=True,copy=False)
+        elif next_sj_df.empty:
+            next_sj_df = local_sj_df
+        save_data(next_sj_df,self.path)
+        del update_match_li,next_sj_df,local_sj_df
 
     def fetch_parse_f(self,input,baseurl):
         pass
@@ -357,6 +388,8 @@ def load_graph_from_config(config):
         g.indegree[node]
     for link in config['links']:
         g.add_link(nodes[link['from']],nodes[link['to']])
+    for node in g.indegree.keys():
+        node.output.clear()
     return g
 
 if __name__ == "__main__":
