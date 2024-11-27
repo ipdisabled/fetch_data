@@ -277,8 +277,10 @@ class SNode:
         targets = [('最低值','平均值','最高值'),('min','mean','max')]
 
         odds_dict_li,local_odds_df = [],None
-        if self.extend == 1:
+        if self.extend != 0:
             local_odds_df = get_local_df(self.path)
+            unique_playids = local_odds_df['playid'].drop_duplicates().head(365)
+            local_odds_df = local_odds_df[local_odds_df['playid'].isin(unique_playids)]
         max_play_id = local_odds_df.iloc[0]['playid']if local_odds_df is not None else 0
         update_match_li = [item for item in input if int(item['playid']) > max_play_id]
 
@@ -314,6 +316,8 @@ class SNode:
         local_sj_df =None
         if self.extend != 0:
             local_sj_df = get_local_df(self.path)
+            unique_playids = local_sj_df['playid'].drop_duplicates().head(365)
+            local_sj_df = local_sj_df[local_sj_df['playid'].isin(unique_playids)]
             #self.output = local_sj_df.values.tolist() if local_sj_df is not None else []
         max_play_id = local_sj_df.iloc[0]['playid']if local_sj_df is not None else 0
         update_match_li = [item for item in input if int(item['playid']) > max_play_id]
